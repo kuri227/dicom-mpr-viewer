@@ -14,7 +14,7 @@ Python/Tkinterで自作した、CT DICOMシリーズのMPR（多断面再構成�
 | R4 | 各断面に他2面の位置を示す縦線・横線を表示 |
 | R5 | 各断面に独立した位置 / WL / WWスライダー（合計9本） |
 | R6 | 位置スライダーと3断面の交差線を連動 |
-| R7 | 未実装。必要データと実装方針は [`R7_IMPLEMENTATION_PLAN.md`](R7_IMPLEMENTATION_PLAN.md) に整理 |
+| R7 | 設計済み・実装準備中。詳細は [`R7_DESIGN.md`](R7_DESIGN.md) に記載 |
 
 ## 必要環境
 
@@ -107,4 +107,4 @@ $env:DICOM_SAMPLE_ZIP = 'C:\path\to\LIDC-IDRI-0265_CT.zip'
 
 課題サンプルを含むDICOM/ZIPはGitHubへ格納しません。`.gitignore` で `*.dcm`、`*.DCM`、`*.zip`、`data/` を除外しています。利用者自身が適切に管理するDICOMをローカルで選択してください。
 
-本アプリは授業課題用であり、診断用途ではありません。任意課題R7（肺領域の3Dボリュームレンダリング）は未実装です。着手に必要な入力、教員へ確認する仕様、最小構成、テスト計画は [`R7_IMPLEMENTATION_PLAN.md`](R7_IMPLEMENTATION_PLAN.md) を参照してください。
+本アプリは授業課題用であり、診断用途ではありません。任意課題R7（肺領域の3Dボリュームレンダリング）の設計は [`R7_DESIGN.md`](R7_DESIGN.md) を参照してください。
