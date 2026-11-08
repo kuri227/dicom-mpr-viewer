@@ -1,6 +1,6 @@
 # DICOM MPR Viewer
 
-Python/Tkinterで自作した、CT DICOMシリーズのMPR（多断面再構成）Viewerです。1つのボリュームからAxial、Coronal、Sagittalを同時表示し、位置、Window Level（WL）、Window Width（WW）を操作できます。
+Python/Tkinterで自作した、CT DICOMシリーズのMPR（多断面再構成）Viewerです。1つのボリュームからAxial、Coronal、Sagittalを同時表示し、位置、Window Level（WL）、Window Width（WW）を操作できます。連続TIFFの二値肺マスクを読み込み、VTKで3Dボリュームレンダリングする観点7にも対応します。
 
 対応範囲は、非圧縮・単一Series・等間隔・標準方向 `ImageOrientationPatient=[1,0,0,0,1,0]` のCTです。対応範囲外のデータは、誤表示を避けるため日本語のエラーを表示して読み込みを中止します。
 
@@ -14,21 +14,24 @@ Python/Tkinterで自作した、CT DICOMシリーズのMPR（多断面再構成�
 | R4 | 各断面に他2面の位置を示す縦線・横線を表示 |
 | R5 | 各断面に独立した位置 / WL / WWスライダー（合計9本） |
 | R6 | 位置スライダーと3断面の交差線を連動 |
-| R7 | 設計済み・実装準備中。詳細は [`R7_DESIGN.md`](R7_DESIGN.md) に記載 |
+| R7 | 連続TIFF肺マスクを検証し、CTとのZ順序を自動判定して3Dボリュームレンダリング。詳細は [`R7_DESIGN.md`](R7_DESIGN.md) に記載 |
 
 ## 必要環境
 
 - Windows 10/11
 - Python 3.11（開発確認: Python 3.11.9）
 - Tkinter 8.6（通常のWindows版Pythonに同梱）
-- メモリ: 1 GB以上の空き容量を推奨（133枚・512×512のCTはHU変換後約133 MB）
+- メモリ: 2 GB以上の空き容量を推奨（CT、肺マスク、VTK描画データを保持）
+- OpenGL対応GPUと最新のグラフィックスドライバー（3D表示時）
 
-外部パッケージは `requirements.txt` のpydicom、NumPy、Pillowだけです。Viewer本体はネット接続を使いません。初回のパッケージ導入にはインターネット接続が必要です。
+外部パッケージは `requirements.txt` のpydicom、NumPy、Pillow、VTKです。Viewer本体はネット接続を使いません。初回のパッケージ導入にはインターネット接続が必要です。
 
 ## 設計
 
 - `dicom_loader.py`: ZIP/フォルダー読込、DICOMタグ検証、空間位置ソート、HU変換を担当します。正常に全スライスを検証してからGUIの表示データを入れ替えます。
 - `mpr.py`: `volume[z,y,x]` を唯一の座標系として、3断面抽出、WL/WW変換、交差線座標、物理アスペクト比変換を純粋関数で提供します。
+- `lung_mask.py`: 多ページTIFFの二値性・shapeを検証し、CTのHUを根拠にZ順序を安全に判定します。
+- `volume3d.py`: `mask[z,y,x]` を物理spacing付きのVTK画像へ変換し、GPUボリュームレンダリングします。
 - `viewer.py`: ファイルメニュー、3パネル、9スライダーとCanvas描画を担当します。位置変更は該当画像と全交差線を更新し、WL/WW変更は該当画像だけを更新します。
 - `main.py`: GUIの起動入口です。
 
@@ -59,6 +62,7 @@ python3.11 -m venv .venv
 
 - ZIPのまま読む: `ファイル > DICOM ZIPを開く...` から `.zip` を選択します。ZIPはディスクへ展開せず、入れ子フォルダー内の `.dcm` / `.DCM` も検索します。
 - 展開済みデータを読む: `ファイル > DICOMフォルダーを開く...` から親フォルダーを選択します。サブフォルダーも再帰検索します。
+- 肺領域を3D表示する: CTを開いた後、`ファイル > 肺マスクTIFFを開いて3D表示...` から同じCTを元に作成した二値の連続TIFFを選択します。
 
 ファイル名やZIP内の順番ではなく、`ImageOrientationPatient` の法線に `ImagePositionPatient` を射影した位置でスライスを並べます。画素値には各スライスの `RescaleSlope` と `RescaleIntercept` を適用してHUへ変換します。患者名や患者IDは表示・ログ出力しません。
 
@@ -69,7 +73,8 @@ python3.11 -m venv .venv
 - **Sagittal**: 体を左右へ移動する断面。内部配列は `volume[:, :, x]`。
 - **位置**: 表示スライスを変更します。赤い縦線と水色の横線が、関連する他の2断面でも直ちに追従します。
 - **WL / WW**: その断面だけの濃度中心/幅を変更します。WWは1以上です。
-- **ショートカット**: `Ctrl+O` でZIP、`Ctrl+Shift+O` でフォルダーを開きます。
+- **3D操作**: VTKウィンドウ上で左ドラッグは回転、右ドラッグはズーム、中ドラッグは平行移動です。操作ウィンドウの「視点をリセット」で初期視点へ戻ります。
+- **ショートカット**: `Ctrl+O` でZIP、`Ctrl+Shift+O` でフォルダー、`Ctrl+L` で肺マスクTIFFを開きます。
 - **ヘルプ**: `ヘルプ > 操作方法` で、画面内から基本操作と交差線の意味を確認できます。
 
 Coronal/Sagittalはスライス間隔と面内PixelSpacingを使って表示比率を補正します。交差線も画像と同じリサイズ・余白変換を使用します。
@@ -82,16 +87,17 @@ Coronal/Sagittalはスライス間隔と面内PixelSpacingを使って表示比�
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-合成DICOMを使い、3断面抽出、WL/WW、交差線、物理アスペクト比、位置整列、HU変換、フォルダー/ZIP同等性、異常データ拒否を確認します。
+合成DICOM/TIFFを使い、3断面抽出、WL/WW、交差線、物理アスペクト比、位置整列、HU変換、フォルダー/ZIP同等性、マスクのZ順序判定、NumPyからVTKへの変換、異常データ拒否を確認します。
 
 手元に課題サンプルZIPがある場合だけ、次のように環境変数を設定すると実データ固有テストも実行されます。ZIP自体はリポジトリに含まれません。
 
 ```powershell
 $env:DICOM_SAMPLE_ZIP = 'C:\path\to\LIDC-IDRI-0265_CT.zip'
+$env:LUNG_MASK_TIFF = 'C:\path\to\lung-mask.tif'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-成功時は最終行が `OK` になります。通常実行ではサンプル固有テスト1件だけが `skipped` です。
+成功時は最終行が `OK` になります。通常実行では実データ固有テストが `skipped` になります。
 
 ## 問題対処
 
@@ -100,11 +106,13 @@ $env:DICOM_SAMPLE_ZIP = 'C:\path\to\LIDC-IDRI-0265_CT.zip'
 - **ZIPを読み取れない**: ZIPが破損していないこと、拡張子 `.dcm` / `.DCM` の画像が含まれることを確認します。
 - **対応外と表示される**: 圧縮DICOM、複数Series混在、斜め/回転撮像、寸法・間隔不一致には対応していません。Seriesごとに分けた標準方向の非圧縮CTを選択してください。
 - **空フォルダー**: 選択したフォルダー以下に `.dcm` / `.DCM` があるか確認します。
+- **肺マスクを開けない**: CTと同じ枚数・寸法の二値連続TIFFであることを確認します。Z順序は正順と逆順を自動比較しますが、回転やX/Y反転は補正しません。
+- **3D表示を開始できない**: `requirements.txt` からVTKを導入し直し、GPUドライバーを更新してください。Windows版VTK wheelの構成上、3D画像はMPR本体とは別ウィンドウで表示されます。
 
 読み込み失敗時は、すでに正常表示していたデータを保持します。
 
 ## 医療画像の取り扱いと制限
 
-課題サンプルを含むDICOM/ZIPはGitHubへ格納しません。`.gitignore` で `*.dcm`、`*.DCM`、`*.zip`、`data/` を除外しています。利用者自身が適切に管理するDICOMをローカルで選択してください。
+課題サンプルを含むDICOM/ZIP/TIFFはGitHubへ格納しません。`.gitignore` で `*.dcm`、`*.DCM`、`*.zip`、`*.tif`、`*.tiff`、`data/` を除外しています。利用者自身が適切に管理する画像をローカルで選択してください。
 
-本アプリは授業課題用であり、診断用途ではありません。任意課題R7（肺領域の3Dボリュームレンダリング）の設計は [`R7_DESIGN.md`](R7_DESIGN.md) を参照してください。
+本アプリは授業課題用であり、診断用途ではありません。観点7の入力検証、位置合わせ、制限事項は [`R7_DESIGN.md`](R7_DESIGN.md) を参照してください。

@@ -59,6 +59,7 @@ class ViewerIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(self.app.bind_all("<Control-o>"))
         self.assertTrue(self.app.bind_all("<Control-Shift-O>"))
+        self.assertTrue(self.app.bind_all("<Control-l>"))
 
         # The user-facing position is consistently 1-based even though the model is 0-based.
         axial_position = self.app.state_model.z_idx

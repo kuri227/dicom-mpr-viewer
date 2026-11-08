@@ -12,7 +12,7 @@
 - TIFFのshape、画素型、ラベル、空マスク、全画面マスクを検証
 - CTとのスライス順を正順・逆順から安全に自動判定
 - CTのvoxel spacingを用いた肺マスクの3Dボリュームレンダリング
-- Tkinter `Toplevel` 内での回転、ズーム、平行移動、視点リセット
+- 独立VTKウィンドウでの回転、ズーム、平行移動と、Tk操作ウィンドウからの視点リセット
 - マスク読込状態と判定結果の表示
 - エラー時に既存MPR表示を維持
 
@@ -48,10 +48,10 @@ TIFFページ順をそのままCTへ対応させた場合、マスク内のHU<-3
 - TIFF読込: 既存依存のPillow `ImageSequence.Iterator`
 - 配列・検証: 既存依存のNumPy
 - 3D描画: `vtk==9.7.2`
-- Tkinter統合: `vtkmodules.tk.vtkTkRenderWindowInteractor`
+- ウィンドウ統合: `vtkRenderWindowInteractor` をTkinterの `after` で非同期処理
 - Volume mapper: `vtkGPUVolumeRayCastMapper`
 
-VTKはPython 3.11 Windows x86-64 wheelが提供され、GPU ray castingとTkinter用Interactorを公式に備える。Qt、PyVista、Webサーバーは追加しない。
+VTKはPython 3.11 Windows x86-64 wheelが提供され、GPU ray castingを備える。Windows wheelにはTk埋め込み用DLLが同梱されないため、VTKの独立RenderWindowをTkinterから管理する。Qt、PyVista、Webサーバーは追加しない。
 
 ## 5. ファイル構成
 
@@ -124,7 +124,7 @@ vtk scalars    = uint8(mask) * 255, flattened in C-order
 - interpolation: linear
 - shading: on
 - background: MPR Canvasと同系統の濃紺
-- camera: `ResetCamera()` 後に正面を初期表示
+- camera: `ResetCamera()` 後に形状を確認しやすい斜め視点を初期表示
 
 GPU volume renderingが初期化できない場合は、例外をGUIで表示し、MPR Viewer本体は継続する。
 
@@ -146,13 +146,12 @@ CT未読込時に肺マスクを選択した場合は、「先にCTを開いて�
 
 ### 3Dウィンドウ
 
-- タイトル: `肺領域 3D Volume Rendering`
-- 上部: 入力ファイル名、voxel数、Z反転の有無、整合率
-- 中央: VTK Interactor
-- 下部: `視点をリセット`、マウス操作説明、`閉じる`
-- 初期サイズ: 800×700、画面内へ収める
+- VTK表示ウィンドウのタイトル: `肺領域 3D Volume Rendering`
+- Tk操作ウィンドウ: 入力ファイル名、voxel数、Z反転の有無、整合率
+- 操作ウィンドウ: `視点をリセット`、マウス操作説明、`閉じる`
+- VTK初期サイズ: 800×700、画面内へ収める
 
-既存の3断面レイアウトへ4枚目を押し込まず、3Dを別ウィンドウにする。これによりR1〜R6の視認性と900×600対応を維持する。
+既存の3断面レイアウトへ4枚目を押し込まず、3Dを独立したVTKウィンドウにする。Tkinter側の小さな操作ウィンドウから視点リセットと終了を行う。これによりR1〜R6の視認性と900×600対応を維持する。
 
 ## 11. 状態遷移
 

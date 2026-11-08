@@ -10,6 +10,7 @@ from typing import Any
 from PIL import Image, ImageTk
 
 from dicom_loader import DicomLoadError, DicomVolume, load_folder, load_zip
+from lung_mask import LungMask, LungMaskError, load_lung_mask
 from mpr import (
     PLANES,
     Plane,
@@ -21,6 +22,7 @@ from mpr import (
     plane_pixel_spacing,
     window_to_uint8,
 )
+from volume3d import LungVolumeWindow, VolumeRenderingError
 
 PLANE_TITLES = {
     "axial": "Axial（横断面）",
@@ -41,12 +43,15 @@ class MprViewer(tk.Tk):
         self._configure_window_size()
         self.data: DicomVolume | None = None
         self.state_model: ViewerState | None = None
+        self.lung_mask: LungMask | None = None
+        self.volume_window: LungVolumeWindow | None = None
         self.panels: dict[Plane, dict[str, Any]] = {}
         self.status = tk.StringVar(value="ファイルメニューからDICOMデータを開いてください")
         self._resize_job: str | None = None
         self._configure_styles()
         self._build_menu()
         self._build_layout()
+        self.protocol("WM_DELETE_WINDOW", self._exit)
 
     def _configure_window_size(self) -> None:
         """Keep the initial window inside the usable area on common laptops."""
@@ -77,7 +82,13 @@ class MprViewer(tk.Tk):
             label="DICOMフォルダーを開く...", accelerator="Ctrl+Shift+O", command=self._choose_folder
         )
         file_menu.add_separator()
-        file_menu.add_command(label="終了", command=self.destroy)
+        file_menu.add_command(
+            label="肺マスクTIFFを開いて3D表示...",
+            accelerator="Ctrl+L",
+            command=self._choose_lung_mask,
+        )
+        file_menu.add_separator()
+        file_menu.add_command(label="終了", command=self._exit)
         menu.add_cascade(label="ファイル", menu=file_menu)
         help_menu = tk.Menu(menu, tearoff=False)
         help_menu.add_command(label="操作方法", command=self._show_help)
@@ -85,6 +96,7 @@ class MprViewer(tk.Tk):
         self.config(menu=menu)
         self.bind_all("<Control-o>", lambda _event: self._choose_zip())
         self.bind_all("<Control-Shift-O>", lambda _event: self._choose_folder())
+        self.bind_all("<Control-l>", lambda _event: self._choose_lung_mask())
 
     def _show_help(self) -> None:
         messagebox.showinfo(
@@ -92,7 +104,8 @@ class MprViewer(tk.Tk):
             "1. ファイルメニューからDICOM ZIPまたはフォルダーを開きます。\n"
             "2. 各断面の［位置］でスライスを移動します。\n"
             "3. WL / WWで、その断面の濃淡を調整します。\n\n"
-            "赤い縦線と水色の横線は、他の2断面の位置を示します。",
+            "赤い縦線と水色の横線は、他の2断面の位置を示します。\n\n"
+            "観点7: CT読込後に［肺マスクTIFFを開いて3D表示］を選択します。",
             parent=self,
         )
 
@@ -184,6 +197,21 @@ class MprViewer(tk.Tk):
         if path:
             self._load(path, is_zip=True)
 
+    def _choose_lung_mask(self) -> None:
+        if self.data is None:
+            messagebox.showwarning(
+                "CTが未読み込みです",
+                "先にDICOM ZIPまたはDICOMフォルダーを開いてください。",
+                parent=self,
+            )
+            return
+        path = filedialog.askopenfilename(
+            title="肺領域の連続TIFFを選択",
+            filetypes=[("TIFFファイル", "*.tif *.tiff"), ("すべてのファイル", "*.*")],
+        )
+        if path:
+            self._load_lung_mask(path)
+
     def _load(self, path: str, is_zip: bool) -> None:
         self.status.set("DICOMデータを読み込んでいます...")
         self.update_idletasks()
@@ -193,6 +221,8 @@ class MprViewer(tk.Tk):
             self.status.set(f"読み込み失敗: {exc}")
             messagebox.showerror("DICOM読み込みエラー", str(exc), parent=self)
             return
+        self._close_volume_window()
+        self.lung_mask = None
         self.data = new_data
         z_count, y_count, x_count = new_data.volume.shape
         self.state_model = ViewerState(
@@ -214,6 +244,48 @@ class MprViewer(tk.Tk):
             f"{z_count}枚  |  ボリューム {z_count}×{y_count}×{x_count} (z×y×x)"
         )
         self._render_all()
+
+    def _load_lung_mask(self, path: str) -> None:
+        if self.data is None:
+            return
+        self.status.set("肺マスクTIFFを検証しています...")
+        self.update_idletasks()
+        try:
+            new_mask = load_lung_mask(path, self.data.volume)
+            new_window = LungVolumeWindow(
+                self,
+                new_mask.mask,
+                self.data.spacing_zyx,
+                source_name=new_mask.source_name,
+                voxel_count=new_mask.voxel_count,
+                reversed_z=new_mask.reversed_z,
+                air_fraction=new_mask.air_fraction,
+            )
+        except (LungMaskError, VolumeRenderingError, OSError, ValueError) as exc:
+            self.status.set(f"肺マスク読込失敗: {exc}")
+            messagebox.showerror("肺マスク／3D表示エラー", str(exc), parent=self)
+            return
+        self._close_volume_window()
+        self.lung_mask = new_mask
+        self.volume_window = new_window
+        order_text = "あり" if new_mask.reversed_z else "なし"
+        self.status.set(
+            f"肺マスク読込完了: {new_mask.source_name}  |  "
+            f"{new_mask.voxel_count:,} voxels  |  Z反転: {order_text}  |  "
+            f"肺野整合率 {new_mask.air_fraction:.1%}"
+        )
+
+    def _close_volume_window(self) -> None:
+        if self.volume_window is not None:
+            try:
+                self.volume_window.close()
+            except tk.TclError:
+                pass
+            self.volume_window = None
+
+    def _exit(self) -> None:
+        self._close_volume_window()
+        self.destroy()
 
     def _on_slider(self, plane: Plane, key: str, raw_value: str) -> None:
         if self.data is None or self.state_model is None:

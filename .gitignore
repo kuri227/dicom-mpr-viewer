@@ -10,5 +10,9 @@ __pycache__/
 *.dcm
 *.DCM
 *.zip
+*.tif
+*.tiff
+*.TIF
+*.TIFF
 LIDC-IDRI-0265_CT/
 data/
