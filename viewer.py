@@ -22,50 +22,123 @@ from mpr import (
     window_to_uint8,
 )
 
-PLANE_TITLES = {"axial": "Axial", "coronal": "Coronal", "sagittal": "Sagittal"}
+PLANE_TITLES = {
+    "axial": "Axial（横断面）",
+    "coronal": "Coronal（冠状断面）",
+    "sagittal": "Sagittal（矢状断面）",
+}
+
+CANVAS_BACKGROUND = "#0d1117"
+PLACEHOLDER_COLOR = "#c7d0d9"
+VERTICAL_LINE_COLOR = "#ff5a5f"
+HORIZONTAL_LINE_COLOR = "#35c8e6"
 
 
 class MprViewer(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("DICOM MPR Viewer")
-        self.geometry("1280x760")
-        self.minsize(960, 650)
+        self._configure_window_size()
         self.data: DicomVolume | None = None
         self.state_model: ViewerState | None = None
         self.panels: dict[Plane, dict[str, Any]] = {}
         self.status = tk.StringVar(value="ファイルメニューからDICOMデータを開いてください")
         self._resize_job: str | None = None
+        self._configure_styles()
         self._build_menu()
         self._build_layout()
+
+    def _configure_window_size(self) -> None:
+        """Keep the initial window inside the usable area on common laptops."""
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        width = min(1280, max(900, screen_width - 80))
+        height = min(760, max(600, screen_height - 120))
+        x = max(0, (screen_width - width) // 2)
+        y = max(0, (screen_height - height) // 3)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.minsize(min(900, screen_width - 40), min(600, screen_height - 80))
+
+    def _configure_styles(self) -> None:
+        style = ttk.Style(self)
+        style.configure("Plane.TLabelframe", padding=8)
+        style.configure("Plane.TLabelframe.Label", font=("Segoe UI", 10, "bold"))
+        style.configure("Info.TLabel", font=("Segoe UI", 9, "bold"))
+        style.configure("Legend.TLabel", foreground="#4a5560")
+        style.configure("Value.TLabel", font=("Segoe UI", 9, "bold"), anchor="e")
 
     def _build_menu(self) -> None:
         menu = tk.Menu(self)
         file_menu = tk.Menu(menu, tearoff=False)
-        file_menu.add_command(label="DICOMフォルダーを開く...", command=self._choose_folder)
-        file_menu.add_command(label="DICOM ZIPを開く...", command=self._choose_zip)
+        file_menu.add_command(
+            label="DICOM ZIPを開く...", accelerator="Ctrl+O", command=self._choose_zip
+        )
+        file_menu.add_command(
+            label="DICOMフォルダーを開く...", accelerator="Ctrl+Shift+O", command=self._choose_folder
+        )
         file_menu.add_separator()
         file_menu.add_command(label="終了", command=self.destroy)
         menu.add_cascade(label="ファイル", menu=file_menu)
+        help_menu = tk.Menu(menu, tearoff=False)
+        help_menu.add_command(label="操作方法", command=self._show_help)
+        menu.add_cascade(label="ヘルプ", menu=help_menu)
         self.config(menu=menu)
+        self.bind_all("<Control-o>", lambda _event: self._choose_zip())
+        self.bind_all("<Control-Shift-O>", lambda _event: self._choose_folder())
+
+    def _show_help(self) -> None:
+        messagebox.showinfo(
+            "操作方法",
+            "1. ファイルメニューからDICOM ZIPまたはフォルダーを開きます。\n"
+            "2. 各断面の［位置］でスライスを移動します。\n"
+            "3. WL / WWで、その断面の濃淡を調整します。\n\n"
+            "赤い縦線と水色の横線は、他の2断面の位置を示します。",
+            parent=self,
+        )
 
     def _build_layout(self) -> None:
-        container = ttk.Frame(self, padding=8)
+        container = ttk.Frame(self, padding=(8, 8, 8, 6))
         container.pack(fill="both", expand=True)
         for column, plane in enumerate(PLANES):
             container.columnconfigure(column, weight=1, uniform="panels")
-            panel = ttk.LabelFrame(container, text=PLANE_TITLES[plane], padding=6)
+            panel = ttk.LabelFrame(container, text=PLANE_TITLES[plane], style="Plane.TLabelframe")
             panel.grid(row=0, column=column, sticky="nsew", padx=4)
             panel.columnconfigure(0, weight=1)
             panel.rowconfigure(0, weight=1)
 
-            canvas = tk.Canvas(panel, bg="#111318", highlightthickness=0, width=380, height=430)
-            canvas.grid(row=0, column=0, columnspan=3, sticky="nsew")
-            canvas.create_text(190, 210, text="未読み込み", fill="#c7cbd1", tags="placeholder")
+            canvas = tk.Canvas(
+                panel,
+                bg=CANVAS_BACKGROUND,
+                highlightthickness=0,
+                width=360,
+                height=360,
+                takefocus=True,
+            )
+            canvas.grid(row=0, column=0, sticky="nsew")
+            canvas.create_text(
+                180,
+                180,
+                text="DICOMデータ未読み込み\nファイルメニューからZIPまたはフォルダーを開いてください",
+                fill=PLACEHOLDER_COLOR,
+                justify="center",
+                width=300,
+                tags="placeholder",
+            )
             canvas.bind("<Configure>", self._on_canvas_resize)
 
+            controls = ttk.Frame(panel, padding=(2, 8, 2, 0))
+            controls.grid(row=1, column=0, sticky="ew")
+            controls.columnconfigure(1, weight=1)
             info = tk.StringVar(value="位置: -")
-            ttk.Label(panel, textvariable=info).grid(row=1, column=0, columnspan=3, sticky="w", pady=(5, 0))
+            ttk.Label(controls, textvariable=info, style="Info.TLabel").grid(
+                row=0, column=0, columnspan=2, sticky="w"
+            )
+            ttk.Label(
+                controls,
+                text="縦: 赤 / 横: 水色",
+                style="Legend.TLabel",
+            ).grid(row=0, column=2, sticky="e")
+            ttk.Separator(controls).grid(row=1, column=0, columnspan=3, sticky="ew", pady=(6, 4))
             variables: dict[str, tk.IntVar] = {
                 "position": tk.IntVar(value=0), "wl": tk.IntVar(value=40), "ww": tk.IntVar(value=400)
             }
@@ -74,25 +147,32 @@ class MprViewer(tk.Tk):
             for row, (key, label, lower, upper) in enumerate(
                 (("position", "位置", 0, 1), ("wl", "WL", -1200, 1500), ("ww", "WW", 1, 3000)), start=2
             ):
-                ttk.Label(panel, text=label, width=5).grid(row=row, column=0, sticky="w")
+                ttk.Label(controls, text=label, width=5).grid(row=row, column=0, sticky="w", pady=2)
                 scale = ttk.Scale(
-                    panel, from_=lower, to=upper, variable=variables[key],
+                    controls, from_=lower, to=upper, variable=variables[key],
                     command=lambda value, p=plane, k=key: self._on_slider(p, k, value),
                 )
                 scale.state(["disabled"])
-                scale.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-                value_label = ttk.Label(panel, text="-", width=7, anchor="e")
+                scale.grid(row=row, column=1, sticky="ew", padx=(6, 8), pady=2)
+                value_label = ttk.Label(controls, text="-", width=7, style="Value.TLabel")
                 value_label.grid(row=row, column=2, sticky="e")
                 scales[key] = scale
                 value_labels[key] = value_label
-            panel.columnconfigure(1, weight=1)
             self.panels[plane] = {
                 "canvas": canvas, "info": info, "variables": variables,
                 "scales": scales, "value_labels": value_labels, "photo": None,
             }
         container.rowconfigure(0, weight=1)
         ttk.Separator(self).pack(fill="x")
-        ttk.Label(self, textvariable=self.status, padding=(10, 6)).pack(fill="x")
+        tk.Label(
+            self,
+            textvariable=self.status,
+            anchor="w",
+            bg="#26323d",
+            fg="#f4f7fa",
+            padx=10,
+            pady=6,
+        ).pack(fill="x")
 
     def _choose_folder(self) -> None:
         path = filedialog.askdirectory(title="DICOMフォルダーを選択")
@@ -129,7 +209,10 @@ class MprViewer(tk.Tk):
             panel["variables"]["ww"].set(new_data.initial_ww)
             for scale in panel["scales"].values():
                 scale.state(["!disabled"])
-        self.status.set(f"読み込み完了: {Path(path).name} / {z_count}枚 / {z_count}×{y_count}×{x_count}")
+        self.status.set(
+            f"読み込み完了: {Path(path).name}  |  "
+            f"{z_count}枚  |  ボリューム {z_count}×{y_count}×{x_count} (z×y×x)"
+        )
         self._render_all()
 
     def _on_slider(self, plane: Plane, key: str, raw_value: str) -> None:
@@ -149,8 +232,12 @@ class MprViewer(tk.Tk):
             self.state_model.set_window(plane, wl, ww)
             self._render_plane(plane)
 
-    def _on_canvas_resize(self, _event: tk.Event[Any]) -> None:
+    def _on_canvas_resize(self, event: tk.Event[Any]) -> None:
         if self.data is None:
+            canvas = event.widget
+            if isinstance(canvas, tk.Canvas):
+                canvas.coords("placeholder", event.width / 2, event.height / 2)
+                canvas.itemconfigure("placeholder", width=max(80, event.width - 40))
             return
         if self._resize_job is not None:
             self.after_cancel(self._resize_job)
@@ -194,7 +281,7 @@ class MprViewer(tk.Tk):
             panel["info"].set(f"位置: {position + 1}/{total}  ({self.data.slice_positions[position]:.2f} mm)")
         else:
             panel["info"].set(f"位置: {position + 1}/{total}")
-        panel["value_labels"]["position"].configure(text=str(position))
+        panel["value_labels"]["position"].configure(text=str(position + 1))
         panel["value_labels"]["wl"].configure(text=str(wl))
         panel["value_labels"]["ww"].configure(text=str(ww))
         if draw_crosshair:
@@ -218,8 +305,8 @@ class MprViewer(tk.Tk):
         )
         x, y = image_index_to_canvas(column, row, columns, rows, panel["rect"])
         x0, y0, width, height = panel["rect"]
-        canvas.create_line(x, y0, x, y0 + height, fill="#ff4d4d", width=2, tags="crosshair")
-        canvas.create_line(x0, y, x0 + width, y, fill="#35d6ff", width=2, tags="crosshair")
+        canvas.create_line(x, y0, x, y0 + height, fill=VERTICAL_LINE_COLOR, width=2, tags="crosshair")
+        canvas.create_line(x0, y, x0 + width, y, fill=HORIZONTAL_LINE_COLOR, width=2, tags="crosshair")
 
 
 def run() -> None:
