@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+.vscode/
+.idea/
+*.dcm
+*.DCM
+*.zip
+LIDC-IDRI-0265_CT/
+data/
